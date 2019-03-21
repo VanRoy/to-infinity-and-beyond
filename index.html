@@ -1,0 +1,500 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+		<title>Scaling Java, To Infinity And Beyond</title>
+
+		<!--
+		<link rel="icon" href="css/img/tiab.ico" />
+		-->
+
+		<link rel="stylesheet" href="css/reveal.css">
+		<link rel="stylesheet" href="css/theme/bankin.css">
+
+		<!-- Theme used for syntax highlighting of code -->
+		<link rel="stylesheet" href="lib/css/a11y-light.css">
+
+		<!-- Printing and PDF exports -->
+		<script>
+			var link = document.createElement( 'link' );
+			link.rel = 'stylesheet';
+			link.type = 'text/css';
+			link.href = window.location.search.match( /print-pdf/gi ) ? 'css/print/pdf.css' : 'css/print/paper.css';
+			document.getElementsByTagName( 'head' )[0].appendChild( link );
+		</script>
+	</head>
+	<body>
+		<div class="reveal">
+			<div class="slides">
+
+				<section data-state="intro">
+					<h1>Scaling Java Application<br />Vers l’infini et au delà</h1>
+					<p>Julien Roy <a href="https://twitter.com/vanr0y">@vanr0y</a></p>
+					<p>Architecte Java</p>
+					<a href="https://bankin.com">
+						<img class="logo" src="css/theme/logo-bankin.png"/>
+					</a>
+				</section>
+
+				<section>
+					<h2>Présentation</h2>
+					<ul>
+						<li>Moteur de calcul de prix d'assurances</li>
+						<li>Backoffice de configuration des produits</li>
+						<li>Exposition d'API à déstination de partenaires</li>
+					</ul>
+				</section>
+
+				<section>
+					<h2>Objectifs</h2>
+					<ul>
+						<li>Temps de réponses < 50ms</li>
+						<li>Nombre de req/s = ∞</li>
+					</ul>
+				</section>
+
+				<section>
+					<h2>Conception</h2>
+					<ul>
+						<li>Stateless</li>
+						<li>Réduction / Suppréssion des IO</li>
+						<li>Utilisation cache</li>
+						<li>Autoscaling ( basé sur CPU )</li>
+					</ul>
+				</section>
+
+				<section>
+					<section>
+						<h2>Architecture</h2>
+						<img src="img/schema/overview_schema.png">
+					</section>
+
+					<section>
+						<h2>Architecture</h2>
+						<img src="img/schema/quoteengine_schema.png">
+					</section>
+
+					<section>
+						<h2>Architecture</h2>
+						<img style="border: 0;" src="img/schema/infra_schema.png">
+					</section>
+				</section>
+
+				<section>
+					<section>
+						<h2>Tests de charge</h2>
+						<ul>
+							<li>15 minutes</li>
+							<li>250 utilisateurs en //</li>
+							<li>Ramp-Up de 10 mins</li>
+						</ul>
+					</section>
+					<section>
+						<h2>Résultats attendus</h2>
+						<ul>
+							<li>Temps de réponse constant < 80 ms</li>
+							<li>Courbe de req/s croissante</li>
+							<li>Taux d'erreur proche de 0</li>
+						</ul>
+					</section>
+					<section>
+						<h2>Résultats attendu</h2>
+						<img src="img/initial/perf_expected.png">
+					</section>
+					<section>
+						<h2>Résultats du premier run</h2>
+						<img src="img/initial/perf.png">
+					</section>
+				</section>
+
+				<section>
+					<section>
+						<h2>Round 1 : Analyse</h2>
+						<p>Timeline des événements ECS</p>
+						<img width="60%" src="img/initial/ecs_events.png">
+					</section>
+					<section>
+						<h2>Round 1 : Analyse</h2>
+						<p>Liste des tâches</p>
+						<img width="60%" src="img/initial/ecs_stopped_tasks.png">
+					</section>
+					<section>
+						<h2>Round 1 : Analyse</h2>
+						<p>Détail d'une tâche</p>
+						<img width="60%" src="img/initial/ecs_task_details.png">
+					</section>
+					<section>
+						<h2>Round 1 : Analyse</h2>
+						<p>Statistiques JVM</p>
+						<img width="60%" src="img/initial/jvm_stats.png">
+					</section>
+
+					<section>
+						<h2>Round 1 : Debug</h2>
+					</section>
+
+                    <section class="offline">
+                        <h2>Round 1 : Debug</h2>
+                        <p>Dépendances</p>
+                        <pre><code  data-trim data-noescape>
+version: '3'
+
+services:
+
+  postgresql:
+    image: postgres:10.1
+    ports:
+      - 5432:5432
+
+  hydra:
+    image: oryd/hydra:v1.0.0-beta.9
+    ports:
+      - 4444:4444
+      - 4445:4445
+    command:
+      serve all --dangerous-force-http
+</code></pre>
+                    </section>
+
+                    <section class="offline">
+                        <h2>Round 1 : Debug</h2>
+                        <p>Lancement application</p>
+						<pre class="shell"><code data-trim data-noescape>
+$ docker run -it -p 8080:8080 -p 1099:1099 \
+  -e JAVA_OPTS='
+    -Xms512m
+    -Xmx512m
+    -XX:MaxMetaspaceSize=128m
+    -XX:+UseG1GC
+    -XX:NativeMemoryTracking=summary
+    -Djava.rmi.server.hostname=localhost
+    -Dcom.sun.management.jmxremote
+    -Dcom.sun.management.jmxremote.port=1099 ' \
+  <mark> --memory 896m </mark> \
+  --memory-swap 896m \
+  --name quoteengine_service \
+  quoteengine_service
+                        </code></pre>
+					</section>
+
+                    <section class="offline">
+                        <h2>Round 1 : Debug</h2>
+                        <p>Simulation latences</p>
+                        <pre class="shell"><code>
+$ docker run --name quoteengine_pumba_hydra_1 -d \
+    gaiaadm/pumba:master netem \
+    --duration 3600m delay --time 500 quoteengine_hydra_1
+
+$ docker run --name quoteengine_pumba_postgresql_1 -d \
+    gaiaadm/pumba:master netem \
+    --duration 3600m --time 200 quoteengine_postgresql_1
+                        </code></pre>
+                    </section>
+
+                    <section class="offline">
+                        <h2>Round 1 : Debug</h2>
+                        <p>Lancement des tests</p>
+                        <img style="border: 0px;" src="img/step-1/jmeter.png">
+                    </section>
+
+                    <section class="offline">
+                        <h2>Round 1 : Debug</h2>
+                        <p>Stats docker au lancement</p>
+                        <img style="border: 0px;" src="img/step-1/memory_start.png">
+					</section>
+
+                    <section class="offline">
+                        <h2>Round 1 : Debug</h2>
+                        <p>Stats docker après 30s</p>
+                        <img style="border: 0px;" src="img/step-1/memory_middle.png">
+                    </section>
+
+                    <section class="offline">
+                        <h2>Round 1 : Debug</h2>
+                        <p>Stats docker après 1min</p>
+                        <img style="border: 0px;" src="img/step-1/memory_end.png">
+                    </section>
+
+                    <section class="offline">
+                        <h2>Round 1 : Debug</h2>
+                        <p>Etat de l'application</p>
+                        <img style="border: 0px;" src="img/step-1/killed.png">
+                    </section>
+
+                    <section class="offline">
+                        <h2>Round 1 : Debug</h2>
+                        <p>Analyse mémoire</p>
+                        <img style="width: 500px; border: 0px;" src="img/step-1/memory_analysis.png">
+                    </section>
+
+                    <section class="offline">
+                        <h2>Round 1 : Debug</h2>
+                        <p>Recherche Bug JVM </p>
+                        <img style="border: 0px;" src="img/step-1/oracle_jdk_issue.png">
+                    </section>
+
+                    <section class="offline">
+                        <h2>Round 1 : Debug</h2>
+                        <p>Résolution</p>
+                        <pre><code class="java" data-trim data-noescape>
+private static byte[] compress(byte[] data) throws IOException {
+    Deflater deflater = new Deflater();
+    deflater.setInput(data);
+    try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream(data.length)) {
+        deflater.finish();
+        byte[] buffer = new byte[1024];
+        while (!deflater.finished()) {
+            int count = deflater.deflate(buffer);
+            outputStream.write(buffer, 0, count);
+        }
+        return outputStream.toByteArray();
+    } <mark>finally {
+        deflater.end();
+    }</mark>
+}
+                        </code></pre>
+                    </section>
+
+                    <section class="offline">
+                        <h2>Round 1 : Tests</h2>
+                    </section>
+
+                    <section>
+						<h2>Round 1 : Résultats</h2>
+						<p>Fuite mémoire résolue</p>
+						<img src="img/step-1/perf.png">
+					</section>
+				</section>
+
+				<section>
+					<section>
+						<h2>Round 2 : Analyse</h2>
+						<p>Timeline des événements ECS</p>
+						<img width="60%" src="img/step-1/ecs_events.png">
+					</section>
+					<section>
+						<h2>Round 2 : Analyse</h2>
+						<p>Graph CPU</p>
+						<img width="60%" src="img/step-1/cpu_metrics.png">
+					</section>
+
+					<section>
+						<h2>Round 2 : Debug</h2>
+					</section>
+
+                    <section class="offline">
+                        <h2>Round 2 : Debug</h2>
+                        <p>Lancement des tests</p>
+                        <img style="border: 0px;" src="img/step-2/jmeter.png">
+                    </section>
+
+                    <section class="offline">
+                        <h2>Round 2 : Debug</h2>
+                        <p>Visualisation des threads</p>
+                        <img style="border: 0px;" src="img/step-2/threads.png">
+                    </section>
+
+                    <section class="offline">
+                        <h2>Round 2 : Debug</h2>
+                        <p>Threads dump</p>
+                        <img style="border: 0px;" src="img/step-2/thread_dump.png">
+                    </section>
+
+                    <section class="offline">
+                        <h2>Round 2 : Debug</h2>
+                        <p>Code source</p>
+                        <pre><code class="java" data-trim data-noescape>
+JwkDefinitionHolder getDefinitionLoadIfNecessary(String keyId) {
+    JwkDefinitionHolder result = this.getDefinition(keyId);
+    if (result != null) {
+        return result;
+    }
+    synchronized (this.jwkDefinitions) {
+        <mark>this.jwkDefinitions.clear();</mark>
+        for (URL jwkSetUrl : jwkSetUrls) {
+            this.jwkDefinitions.putAll(loadJwkDefinitions(jwkSetUrl));
+        }
+        return this.getDefinition(keyId);
+    }
+}
+                        </code></pre>
+                    </section>
+
+                    <section class="offline">
+                        <h2>Round 2 : Debug</h2>
+                        <p>Résolution</p>
+                        <pre><code class="java" data-trim data-noescape>
+JwkDefinitionHolder getDefinitionLoadIfNecessary(String keyId) {
+    JwkDefinitionHolder result = this.getDefinition(keyId);
+    if (result != null) {
+        return result;
+    }
+    synchronized (this.jwkDefinitions) {
+<mark>
+        // Double-checked locking pattern
+        result = this.getDefinition(keyId);
+        if (result != null) {
+            return result;
+        }
+</mark>
+        this.jwkDefinitions.clear();
+        for (URL jwkSetUrl : jwkSetUrls) {
+            this.jwkDefinitions.putAll(loadJwkDefinitions(jwkSetUrl));
+        }
+        return this.getDefinition(keyId);
+    }
+}
+                        </code></pre>
+                    </section>
+
+                    <section class="offline">
+                        <h2>Round 2 : Tests</h2>
+                    </section>
+
+                    <section>
+						<h2>Round 2 : Résultats</h2>
+						<p>Race condition résolue</p>
+						<img src="img/step-2/perf.png">
+					</section>
+				</section>
+
+				<section>
+					<section>
+						<h2>Round 3 : Analyse</h2>
+						<p>Connection DB</p>
+						<img width="60%" src="img/step-2/db_connexions.png">
+					</section>
+
+					<section>
+						<h2>Round 3 : Analyse</h2>
+						<p>Requetes DB</p>
+						<img width="60%" src="img/step-2/db_ops.png">
+					</section>
+
+					<section>
+						<h2>Round 3 : Debug</h2>
+					</section>
+
+                    <section class="offline">
+                        <h2>Round 3 : Debug</h2>
+                        <p>Activation logs</p>
+                        <pre><code class="java" data-trim data-noescape>
+logging:
+  level:
+    org.springframework.jdbc.core: TRACE
+                        </code></pre>
+                    </section>
+
+                    <section class="offline">
+                        <h2>Round 3 : Debug</h2>
+                        <p>Logs Spring JDBC</p>
+                        <img style="border: 0px;" src="img/final/logs_spring.png">
+                    </section>
+
+                    <section class="offline">
+                        <h2>Round 3 : Debug</h2>
+                        <p>Activation logs Driver</p>
+                        <pre><code class="java" data-trim data-noescape>
+logging:
+  level:
+    org.postgresql.core.v3.QueryExecutorImpl: TRACE
+                        </code></pre>
+                    </section>
+
+                    <section class="offline">
+                        <h2>Round 3 : Debug</h2>
+                        <p>Logs Driver Postgresql</p>
+                        <img style="border: 0px;" src="img/final/logs_postgresql.png">
+                    </section>
+
+                    <section class="offline">
+                        <h2>Round 3 : Debug</h2>
+                        <p>Break point driver Posgresql</p>
+                        <img style="border: 0px;" src="img/final/break_point.png">
+                    </section>
+
+                    <section class="offline">
+                        <h2>Round 3 : Debug</h2>
+                        <p>Résolution</p>
+                        <pre><code class="java" data-trim data-noescape>
+@Service
+<mark>@Transactional</mark>
+@RequiredArgsConstructor
+public class TaxService {
+
+  private final CacheManager cacheManager;
+
+  public List&lt;GlobalTax&gt; getGlobalTaxes(String countryCode) {
+    return Optional.ofNullable(getGlobalTaxCache().get(countryCode)).map(Cache.ValueWrapper::get).orElse(null);
+  }
+
+  private Cache getGlobalTaxCache() {
+    return cacheManager.getCache(CacheConfiguration.GLOBAL_TAX_CACHE_NAME);
+  }
+                        </code></pre>
+                    </section>
+					<section>
+						<h2>Round 3 : Résultats</h2>
+						<p>Gestion du cache améliorée</p>
+						<img src="img/final/perf.png">
+					</section>
+				</section>
+
+				<section>
+					<h2>La suite</h2>
+					<ul>
+						<li class="fragment">Tests de performance intégré au pipeline de déploiment</li>
+						<li class="fragment">Amélioration autoscaling ( basé sur les temps de réponses ? )</li>
+					</ul>
+				</section>
+
+				<section>
+					<h2>Points clés</h2>
+					<ul>
+						<li class="fragment">Environnment stable ( ISO prod )</li>
+						<li class="fragment">Mesures reproductibles ( jeux de données )</li>
+						<li class="fragment">Metriques complétes</li>
+						<li class="fragment">Une seule modification à la fois</li>
+						<li class="fragment">Reproduction en local ( Si possible )</li>
+					</ul>
+				</section>
+
+				<section data-background="img/buzz-java-awesome.jpg">
+					<h2>Questions</h2>
+				</section>
+
+			</div>
+		</div>
+
+		<script src="lib/js/head.min.js"></script>
+		<script src="js/reveal.js"></script>
+
+		<script>
+			let url = document.location.href;
+			if (url.match("onine")) {
+				document.querySelectorAll('.offline').forEach(function(slide ) { slide.remove(); });
+			}
+
+			// More info about config & dependencies:
+			// - https://github.com/hakimel/reveal.js#configuration
+			// - https://github.com/hakimel/reveal.js#dependencies
+			Reveal.initialize({
+
+				progress: true,
+				history: true,
+				slideNumber: true,
+				zoomLevel: 2.5,
+
+				dependencies: [
+					{ src: 'plugin/markdown/marked.js' },
+					{ src: 'plugin/markdown/markdown.js' },
+					{ src: 'plugin/notes/notes.js', async: true },
+					{ src: 'plugin/zoom-js/zoom.js', async: true },
+					{ src: 'plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } }
+				]
+			});
+		</script>
+	</body>
+</html>
